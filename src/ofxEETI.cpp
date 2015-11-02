@@ -27,6 +27,9 @@ ofxEETI::ofxEETI()
 {
 	bInitialized = false;
 	bRunning = false;
+	bInCalibration = false;
+	bUseCalibration = false;
+	touchMaxX = touchMaxY = 0x7ff;
 	
 	for (int i=0; i<MAX_TOUCH; i++) {
 		touches[i].bDown = false;
@@ -94,6 +97,51 @@ void ofxEETI::stop(bool wait)
 		}
 	}
 	ofRemoveListener(ofEvents().update, this, &ofxEETI::update, OF_EVENT_ORDER_AFTER_APP);
+}
+
+void ofxEETI::useCalibration(const string &filename)
+{
+	calibrationJson.open(filename);
+	cacheCalibrationMatrix();
+	bUseCalibration = true;
+}
+
+void ofxEETI::startCalibration(const string& filename, int width, int height)
+{
+	if (!bInitialized ||
+		!bRunning ||
+		bInCalibration) {
+		return;
+	}
+	
+	calibrationFilename = filename;
+	screenWidth = width;
+	screenHeight = height;
+	bInCalibration = true;
+	bUseCalibration = false;
+	calibrationPointIndex = 0;
+
+	calibrationJson.clear();
+	calibrationJson["screen_points"][0]["x"] = 30;
+	calibrationJson["screen_points"][0]["y"] = 30;
+	calibrationJson["screen_points"][1]["x"] = screenWidth-30;
+	calibrationJson["screen_points"][1]["y"] = 30;
+	calibrationJson["screen_points"][2]["x"] = screenWidth-30;
+	calibrationJson["screen_points"][2]["y"] = screenHeight-30;
+	calibrationJson["screen_points"][3]["x"] = 30;
+	calibrationJson["screen_points"][3]["y"] = screenHeight-30;
+
+	ofAddListener(ofEvents().draw, this, &ofxEETI::drawCalibration, OF_EVENT_ORDER_AFTER_APP);
+}
+
+void ofxEETI::abortCalibration()
+{
+	if (!bInCalibration) {
+		return;
+	}
+	
+	bInCalibration = false;
+	ofRemoveListener(ofEvents().draw, this, &ofxEETI::drawCalibration, OF_EVENT_ORDER_AFTER_APP);
 }
 
 bool ofxEETI::initEETI()
@@ -201,9 +249,16 @@ void ofxEETI::threadFunction()
 void ofxEETI::parsePacket(const unsigned char *buff)
 {
 	int id = (buff[5]&0xf) - 1;
-	int x = buff[1]<<7 | buff[2];
-	int y = buff[3]<<7 | buff[4];
+	int tx = buff[1]<<7 | buff[2];
+	int ty = buff[3]<<7 | buff[4];
 	bool bDown = buff[0]&0x1;
+	
+	int x = tx;
+	int y = ty;
+	if (bUseCalibration) {
+		x = getScreenPointX(tx, ty);
+		y = getScreenPointY(tx, ty);
+	}
 
 	Touch& touch = touches[id];
 	if (bDown) {
@@ -271,6 +326,10 @@ void ofxEETI::update(ofEventArgs &args)
 	
 	for (Touch& event: sendEvents) {
 		ofNotifyEvent(eventTouch, event, this);
+		
+		if (bInCalibration) {
+			handleCalibrationTouch(event);
+		}
 	}
 }
 
@@ -279,6 +338,138 @@ void ofxEETI::addEvent(const Touch& touch)
 	touchMutex.lock();
 	events.push_back(touch);
 	touchMutex.unlock();
+}
+
+void ofxEETI::drawCalibration(ofEventArgs& args)
+{
+	switch (calibrationPointIndex) {
+		case 0:
+			drawCross(ofVec2f(30, 30));
+			break;
+		case 1:
+			drawCross(ofVec2f(screenWidth-30, 30));
+			break;
+		case 2:
+			drawCross(ofVec2f(screenWidth-30, screenHeight-30));
+			break;
+		case 3:
+			drawCross(ofVec2f(30, screenHeight-30));
+			break;
+	}
+}
+
+void ofxEETI::handleCalibrationTouch(Touch& touch)
+{
+	if (touch.id != 0) {
+		return;
+	}
+	
+	if (touch.type == ofTouchEventArgs::down) {
+		calibrationPoint = ofVec2f(touch.x, touch.y);
+	}
+	else if (touch.type == ofTouchEventArgs::move) {
+		calibrationPoint = ofVec2f(touch.x, touch.y).interpolate(calibrationPoint, 0.5);
+	}
+	else if (touch.type == ofTouchEventArgs::up) {
+		// save point in calibration
+		calibrationJson["touch_points"][calibrationPointIndex]["x"] = calibrationPoint.x;
+		calibrationJson["touch_points"][calibrationPointIndex]["y"] = calibrationPoint.y;
+		calibrationPointIndex++;
+		if (calibrationPointIndex>3) {
+			if (calcCalibrationCoeffs()) {
+				calibrationJson.save(calibrationFilename, true);
+				cacheCalibrationMatrix();
+				bUseCalibration = true;
+			}
+			else {
+				ofLogError("ofxEETI") << "error calculating matrix coefficients";
+			}
+			// done with calibration
+			abortCalibration();
+		}
+	}
+}
+
+bool ofxEETI::calcCalibrationCoeffs()
+{
+	ofVec2f screenPoints[3];
+	ofVec2f touchPoints[3];
+	for (int i=0; i<3; i++) {
+		screenPoints[i] = ofVec2f(calibrationJson["screen_points"][i]["x"].asFloat(),
+								  calibrationJson["screen_points"][i]["y"].asFloat());
+		touchPoints[i] = ofVec2f(calibrationJson["touch_points"][i]["x"].asFloat(),
+								  calibrationJson["touch_points"][i]["y"].asFloat());
+	}
+	
+	calibrationJson["matrix"]["divider"] = 
+		((touchPoints[0].x-touchPoints[2].x) * (touchPoints[1].y-touchPoints[2].y)) -
+		((touchPoints[1].x-touchPoints[2].x) * (touchPoints[0].y-touchPoints[2].y));
+		
+		if( calibrationJson["matrix"]["divider"].asFloat() == 0 )
+		{
+			return false;
+		}
+		else
+		{
+			calibrationJson["matrix"]["An"] = ((screenPoints[0].x - screenPoints[2].x) * (touchPoints[1].y - touchPoints[2].y)) -
+			((screenPoints[1].x - screenPoints[2].x) * (touchPoints[0].y - touchPoints[2].y)) ;
+			
+			calibrationJson["matrix"]["Bn"] = ((touchPoints[0].x - touchPoints[2].x) * (screenPoints[1].x - screenPoints[2].x)) -
+			((screenPoints[0].x - screenPoints[2].x) * (touchPoints[1].x - touchPoints[2].x)) ;
+			
+			calibrationJson["matrix"]["Cn"] = (touchPoints[2].x * screenPoints[1].x - touchPoints[1].x * screenPoints[2].x) * touchPoints[0].y +
+			(touchPoints[0].x * screenPoints[2].x - touchPoints[2].x * screenPoints[0].x) * touchPoints[1].y +
+			(touchPoints[1].x * screenPoints[0].x - touchPoints[0].x * screenPoints[1].x) * touchPoints[2].y ;
+			
+			calibrationJson["matrix"]["Dn"] = ((screenPoints[0].y - screenPoints[2].y) * (touchPoints[1].y - touchPoints[2].y)) -
+			((screenPoints[1].y - screenPoints[2].y) * (touchPoints[0].y - touchPoints[2].y)) ;
+			
+			calibrationJson["matrix"]["En"] = ((touchPoints[0].x - touchPoints[2].x) * (screenPoints[1].y - screenPoints[2].y)) -
+			((screenPoints[0].y - screenPoints[2].y) * (touchPoints[1].x - touchPoints[2].x)) ;
+			
+			calibrationJson["matrix"]["Fn"] = (touchPoints[2].x * screenPoints[1].y - touchPoints[1].x * screenPoints[2].y) * touchPoints[0].y +
+			(touchPoints[0].x * screenPoints[2].y - touchPoints[2].x * screenPoints[0].y) * touchPoints[1].y +
+			(touchPoints[1].x * screenPoints[0].y - touchPoints[0].x * screenPoints[1].y) * touchPoints[2].y ;
+		}
+		
+		return true;
+}
+
+void ofxEETI::cacheCalibrationMatrix()
+{
+	calibrationMatrix.a = calibrationJson["matrix"]["An"].asFloat();
+	calibrationMatrix.b = calibrationJson["matrix"]["Bn"].asFloat();
+	calibrationMatrix.c = calibrationJson["matrix"]["Cn"].asFloat();
+	calibrationMatrix.d = calibrationJson["matrix"]["Dn"].asFloat();
+	calibrationMatrix.e = calibrationJson["matrix"]["En"].asFloat();
+	calibrationMatrix.f = calibrationJson["matrix"]["Fn"].asFloat();
+	calibrationMatrix.i = calibrationJson["matrix"]["divider"].asFloat();
+}
+
+float ofxEETI::getScreenPointX(float x, float y)
+{
+	if (calibrationMatrix.i == 0) {
+		return 0;
+	}
+
+	return ((calibrationMatrix.a * x) + (calibrationMatrix.b * y) + calibrationMatrix.c) / calibrationMatrix.i;
+}
+
+float ofxEETI::getScreenPointY(float x, float y)
+{
+	if (calibrationMatrix.i == 0) {
+		return 0;
+	}
+
+	return ((calibrationMatrix.d * x) + (calibrationMatrix.e * y) + calibrationMatrix.f) / calibrationMatrix.i;
+}
+
+void ofxEETI::drawCross(const ofVec2f& p)
+{
+	ofDrawArrow(p, p+ofVec2f(-15, 0));
+	ofDrawArrow(p, p+ofVec2f(15, 0));
+	ofDrawArrow(p, p+ofVec2f(0, -15));
+	ofDrawArrow(p, p+ofVec2f(0, 15));
 }
 
 void ofxEETI::printBuffer(unsigned char* buffer, int count)
