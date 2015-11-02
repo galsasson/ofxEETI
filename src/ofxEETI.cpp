@@ -8,7 +8,7 @@
 
 #include "ofxEETI.h"
 
-#define DEBUG_SERIAL
+//#define DEBUG_SERIAL
 
 static unsigned char eeti_alive[3] = { 0x0a, 0x01, 'A' };
 static unsigned char eeti_fwver[3] = { 0x0a, 0x01, 'D' };
@@ -26,7 +26,7 @@ ofxEETI::~ofxEETI()
 ofxEETI::ofxEETI()
 {
 	bInitialized = false;
-	bThreadRunning = false;
+	bRunning = false;
 	
 	for (int i=0; i<MAX_TOUCH; i++) {
 		touches[i].bDown = false;
@@ -37,13 +37,13 @@ ofxEETI::ofxEETI()
 	}
 }
 
-bool ofxEETI::setup(const string &devname, int baudrate)
+bool ofxEETI::setup(const string &devname, int baudrate, bool parseSerialInThread)
 {
-	ofLogNotice("ofxEETI") << "openning touch device: " << devname << "@"<<baudrate<<"bps";
+	ofLogNotice("ofxEETI") << "openning touch device: " << devname << " @ "<<baudrate<<"bps";
 	bool success = serial.setup(devname, baudrate);
 	if (success) {
 		if (initEETI()) {
-			ofLogNotice("ofxEETI") << "found EETI eGalax touch panel at "<<devname;
+			ofLogNotice("ofxEETI") << "EETI eGalax touch panel initialized successfully";
 		}
 		else {
 			ofLogError("ofxEETI") << "device at "<<devname<<" is not an EETI eGalax touch panel";
@@ -56,13 +56,14 @@ bool ofxEETI::setup(const string &devname, int baudrate)
 		return false;
 	}
 	
+	bParseSerialInThread = parseSerialInThread;
 	return true;
 }
 
 
 void ofxEETI::start()
 {
-	if (bThreadRunning) {
+	if (bRunning) {
 		ofLogWarning("ofxEETI") << "start called while thread already running";
 		return;
 	}
@@ -72,24 +73,27 @@ void ofxEETI::start()
 		return;
 	}
 
-	bThreadRunning = true;
-	thread = std::thread(&ofxEETI::threadFunction, this);
-
-//	ofAddListener(ofEvents().update, this, &ofxEETI::update, OF_EVENT_ORDER_AFTER_APP);
+	ofAddListener(ofEvents().update, this, &ofxEETI::update, OF_EVENT_ORDER_AFTER_APP);
+	if (bParseSerialInThread) {
+		thread = std::thread(&ofxEETI::threadFunction, this);
+	}
+	
+	bRunning = true;
 }
 
 void ofxEETI::stop(bool wait)
 {
-	if (!bThreadRunning) {
+	if (!bRunning) {
 		return;
 	}
 
-	bThreadRunning = false;
-	if (wait) {
-		thread.join();
+	bRunning = false;
+	if (bParseSerialInThread) {
+		if (wait) {
+			thread.join();
+		}
 	}
-
-//	ofRemoveListener(ofEvents().update, this, &ofxEETI::update, OF_EVENT_ORDER_AFTER_APP);
+	ofRemoveListener(ofEvents().update, this, &ofxEETI::update, OF_EVENT_ORDER_AFTER_APP);
 }
 
 bool ofxEETI::initEETI()
@@ -99,56 +103,99 @@ bool ofxEETI::initEETI()
 	
 	unsigned char buff[1024];	// should be more than enough
 	
+	// send alive message
 	serial.writeBytes(eeti_alive, 3);
 	// wait for response
-	int timeout=100;
-	while (serial.available()<3 && timeout-->0) {
-		usleep(1000);
-	}
-	
-	if (timeout==0) {
-		ofLogError("ofxEETI") << "timeout waiting for touch panel response";
+	if (waitForResponse(3, 500) < 3) {
 		return false;
 	}
 	
-	int length = serial.available();
-	serial.readBytes(buff, length);
-	printf("alive response: \n");
-	for (int i=0; i<length; i++) {
-		printf("0x%0x ", buff[i]);
-	}
-	printf("\n");
+	int count = serial.available();
+	serial.readBytes(buff, count);
+#ifdef DEBUG_SERIAL
+	printf("eeti_alive response: ");
+	printBuffer(buff, count);
+#endif
 	if (buff[0] != eeti_alive[0] ||
 		buff[1] != eeti_alive[1] ||
 		buff[2] != eeti_alive[2]) {
 		return false;
 	}
+	ofLogNotice("ofxEETI") << "Found EETI eGalax touch panel";
+	
+	// get firmware version
+	serial.writeBytes(eeti_fwver, 3);
+	if (waitForResponse(3, 500) < 3) {
+		return false;
+	}
+	
+	usleep(50000);
+	count = serial.available();
+	serial.readBytes(buff, count);
+#ifdef DEBUG_SERIAL
+	printf("eeti_fwver response: ");
+	printBuffer(buff, count);
+#endif
+	stringstream fwver;
+	for (int i=0; i<(int)buff[1]-1; i++) {
+		fwver << (char)buff[3+i];
+	}
+	ofLogNotice("ofxEETI") << "Firmware version: "<<fwver.str();
+
+	
+	// get controller type
+	serial.writeBytes(eeti_ctrlr, 3);
+	if (waitForResponse(3, 500) < 3) {
+		return false;
+	}
+	
+	usleep(50000);
+	count = serial.available();
+	serial.readBytes(buff, count);
+#ifdef DEBUG_SERIAL
+	printf("eeti_ctrlr response: ");
+	printBuffer(buff, count);
+#endif
+	stringstream ctrlr;
+	for (int i=0; i<(int)buff[1]-1; i++) {
+		ctrlr << (char)buff[3+i];
+	}
+	ofLogNotice("ofxEETI") << "Controller type: "<<ctrlr.str();
 	
 	bInitialized = true;
 	return true;
 }
 
+int ofxEETI::waitForResponse(int nBytes, unsigned int timeout_ms)
+{
+	int timeout=timeout_ms;
+	int bytes;
+	while ((bytes = serial.available())<nBytes && timeout-->0) {
+		usleep(1000);
+	}
+	
+	if (timeout==0) {
+		ofLogError("ofxEETI") << "timeout waiting for touch panel response";
+		return bytes;
+	}
+	
+	return bytes;
+}
+
 void ofxEETI::threadFunction()
 {
-	unsigned char* buff = (unsigned char*)malloc(6);
-
-	while (bThreadRunning) {
+	unsigned char buff[1024];
+	
+	while (bRunning) {
 		while (serial.available() >= 6) {
 			int count = serial.readBytes(buff, 6);
-			parsePacket(buff);
-
 #ifdef DEBUG_SERIAL
-			for (int i=0; i<count; i++) {
-				printf("0x%0x ", buff[i]);
-			}
-			printf("\n");
+			printBuffer(buff, count);
 #endif
-
+			parsePacket(buff);
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
-
-	free(buff);
 }
 
 void ofxEETI::parsePacket(const unsigned char *buff)
@@ -203,8 +250,20 @@ void ofxEETI::parsePacket(const unsigned char *buff)
 	}
 }
 
-void ofxEETI::update()
+void ofxEETI::update(ofEventArgs &args)
 {
+	if (!bParseSerialInThread) {
+		// read serial
+		unsigned char buff[1024];
+		while (serial.available() >= 6) {
+			int count = serial.readBytes(buff, 6);
+	#ifdef DEBUG_SERIAL
+			printBuffer(buff, count);
+	#endif
+			parsePacket(buff);
+		}
+	}
+	// send events
 	touchMutex.lock();
 	vector<Touch> sendEvents = events;
 	events.clear();
@@ -215,14 +274,17 @@ void ofxEETI::update()
 	}
 }
 
-void ofxEETI::update(ofEventArgs &args)
-{
-	return update();
-}
-
 void ofxEETI::addEvent(const Touch& touch)
 {
 	touchMutex.lock();
 	events.push_back(touch);
 	touchMutex.unlock();
+}
+
+void ofxEETI::printBuffer(unsigned char* buffer, int count)
+{
+	for (int i=0; i<count; i++) {
+		printf("0x%0x ", buffer[i]);
+	}
+	printf("\n");
 }

@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include "ofMain.h"
 
-#define MAX_TOUCH 16
+#define MAX_TOUCH 10
 
 class ofxEETI
 {
@@ -21,7 +21,7 @@ public:
 	~ofxEETI();
 	ofxEETI();
 
-	bool setup(const string& devname, int baudrate);
+	bool setup(const string& devname, int baudrate, bool parseSerialInThread=true);
 	void start();
 	void stop(bool wait=false);
 
@@ -35,24 +35,27 @@ public:
 	};
 
 	ofEvent<Touch> eventTouch;
-	
-	void update();
 
 private:
 	ofSerial serial;
 	std::thread thread;
 	bool bInitialized;
-	bool bThreadRunning;
+	bool bRunning;
+	bool bParseSerialInThread;
 	Touch touches[MAX_TOUCH];
 	vector<Touch> events;
 	std::mutex touchMutex;
 
 
 	bool initEETI();
+	int waitForResponse(int nBytes, unsigned int timeout_ms);	// returns number of bytes available
 	void threadFunction();
 	void parsePacket(const unsigned char* buff);
 	void update(ofEventArgs& args);
 	void addEvent(const Touch& touch);
+	
+	// for debug
+	void printBuffer(unsigned char* buffer, int count);
 };
 
 #endif /* defined(__ofxEETI__ofxEETI__) */
