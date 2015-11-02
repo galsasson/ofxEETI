@@ -133,7 +133,7 @@ void ofxEETI::threadFunction()
 	unsigned char* buff = (unsigned char*)malloc(6);
 
 	while (bThreadRunning) {
-		if (serial.available() >= 6) {
+		while (serial.available() >= 6) {
 			int count = serial.readBytes(buff, 6);
 			parsePacket(buff);
 
