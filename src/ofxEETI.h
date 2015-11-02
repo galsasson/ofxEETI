@@ -12,9 +12,7 @@
 #include <stdio.h>
 #include "ofMain.h"
 
-static const unsigned char eeti_alive[3] = { 0x0a, 0x01, 'A' };
-static const unsigned char eeti_fwver[3] = { 0x0a, 0x01, 'D' };
-static const unsigned char eeti_ctrlr[3] = { 0x0a, 0x01, 'E' };
+#define MAX_TOUCH 16
 
 class ofxEETI
 {
@@ -27,29 +25,34 @@ public:
 	void start();
 	void stop(bool wait=false);
 
-	ofEvent<ofTouchEventArgs> eventTouch;
+	struct Touch {
+		bool bDown;
+		ofTouchEventArgs::Type type;
+		int id;
+		int x;
+		int y;
+		bool bReport;
+	};
+
+	ofEvent<Touch> eventTouch;
+	
+	void update();
 
 private:
 	ofSerial serial;
 	std::thread thread;
+	bool bInitialized;
 	bool bThreadRunning;
+	Touch touches[MAX_TOUCH];
+	vector<Touch> events;
+	std::mutex touchMutex;
+
+
+	bool initEETI();
 	void threadFunction();
-
 	void parsePacket(const unsigned char* buff);
-
-	struct ofxEETITouch {
-		int id;
-		int x;
-		int y;
-	};
-
-	map<int, ofxEETITouch*> touches;
-	std::mutex eventsMutex;
-	vector<ofTouchEventArgs*> pendingEvents;
-	void addEvent(ofTouchEventArgs::Type type, int id, float x, float y);
-
 	void update(ofEventArgs& args);
-
+	void addEvent(const Touch& touch);
 };
 
 #endif /* defined(__ofxEETI__ofxEETI__) */
