@@ -29,7 +29,6 @@ ofxEETI::ofxEETI()
 	bRunning = false;
 	bInCalibration = false;
 	bUseCalibration = false;
-	touchMaxX = touchMaxY = 0x7ff;
 	
 	for (int i=0; i<MAX_TOUCH; i++) {
 		touches[i].bDown = false;
@@ -99,15 +98,25 @@ void ofxEETI::stop(bool wait)
 	ofRemoveListener(ofEvents().update, this, &ofxEETI::update, OF_EVENT_ORDER_AFTER_APP);
 }
 
-void ofxEETI::useCalibration(const string &filename)
+bool ofxEETI::useCalibration(const string &filename)
 {
-	calibrationJson.open(filename);
+#if defined(HAVE_OFXJSON)
+	if (!calibrationJson.open(filename)) {
+		return false;
+	}
+	
 	cacheCalibrationMatrix();
 	bUseCalibration = true;
+	return true;
+#else
+	ofLogError("ofxEETI") << "calibration disabled, #define HAVE_OFXJSON in the head of ofxEETI.h (or in project settings) to enable";
+	return false;
+#endif
 }
 
 void ofxEETI::startCalibration(const string& filename, int width, int height)
 {
+#if defined(HAVE_OFXJSON)
 	if (!bInitialized ||
 		!bRunning ||
 		bInCalibration) {
@@ -132,6 +141,10 @@ void ofxEETI::startCalibration(const string& filename, int width, int height)
 	calibrationJson["screen_points"][3]["y"] = screenHeight-30;
 
 	ofAddListener(ofEvents().draw, this, &ofxEETI::drawCalibration, OF_EVENT_ORDER_AFTER_APP);
+#else
+	ofLogError("ofxEETI") << "calibration disabled, #define HAVE_OFXJSON in the head of ofxEETI.h (or in project settings) to enable";
+	return false;
+#endif
 }
 
 void ofxEETI::abortCalibration()
@@ -342,6 +355,14 @@ void ofxEETI::addEvent(const Touch& touch)
 
 void ofxEETI::drawCalibration(ofEventArgs& args)
 {
+	ofSetColor(0, 128);
+	ofFill();
+	ofDrawRectangle(0, 0, screenWidth, screenHeight);
+	ofSetColor(255);
+	ofNoFill();
+	ofSetLineWidth(1);
+	ofDrawRectangle(0, 0, screenWidth, screenHeight);
+	
 	switch (calibrationPointIndex) {
 		case 0:
 			drawCross(ofVec2f(30, 30));
@@ -360,6 +381,7 @@ void ofxEETI::drawCalibration(ofEventArgs& args)
 
 void ofxEETI::handleCalibrationTouch(Touch& touch)
 {
+#if defined(HAVE_OFXJSON)
 	if (touch.id != 0) {
 		return;
 	}
@@ -385,13 +407,19 @@ void ofxEETI::handleCalibrationTouch(Touch& touch)
 				ofLogError("ofxEETI") << "error calculating matrix coefficients";
 			}
 			// done with calibration
+			ofLogNotice("ofxEETI") << "calibration completed and saved to: "<<calibrationFilename;
 			abortCalibration();
 		}
 	}
+#else
+	ofLogError("ofxEETI") << "calibration disabled, #define HAVE_OFXJSON in the head of ofxEETI.h (or in project settings) to enable";
+	return;
+#endif
 }
 
 bool ofxEETI::calcCalibrationCoeffs()
 {
+#if defined(HAVE_OFXJSON)
 	ofVec2f screenPoints[3];
 	ofVec2f touchPoints[3];
 	for (int i=0; i<3; i++) {
@@ -433,10 +461,15 @@ bool ofxEETI::calcCalibrationCoeffs()
 		}
 		
 		return true;
+#else
+	ofLogError("ofxEETI") << "calibration disabled, #define HAVE_OFXJSON in the head of ofxEETI.h (or in project settings) to enable";
+	return false;
+#endif
 }
 
 void ofxEETI::cacheCalibrationMatrix()
 {
+#if defined(HAVE_OFXJSON)
 	calibrationMatrix.a = calibrationJson["matrix"]["An"].asFloat();
 	calibrationMatrix.b = calibrationJson["matrix"]["Bn"].asFloat();
 	calibrationMatrix.c = calibrationJson["matrix"]["Cn"].asFloat();
@@ -444,6 +477,10 @@ void ofxEETI::cacheCalibrationMatrix()
 	calibrationMatrix.e = calibrationJson["matrix"]["En"].asFloat();
 	calibrationMatrix.f = calibrationJson["matrix"]["Fn"].asFloat();
 	calibrationMatrix.i = calibrationJson["matrix"]["divider"].asFloat();
+#else
+	ofLogError("ofxEETI") << "calibration disabled, #define HAVE_OFXJSON in the head of ofxEETI.h (or in project settings) to enable";
+	return;
+#endif
 }
 
 float ofxEETI::getScreenPointX(float x, float y)

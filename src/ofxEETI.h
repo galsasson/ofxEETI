@@ -12,7 +12,11 @@
 #include <stdio.h>
 #include "ofMain.h"
 
-#include "ofxJSON.h"
+#define HAVE_OFXJSON
+
+#if defined(HAVE_OFXJSON)
+  #include "ofxJSON.h"
+#endif
 
 #define MAX_TOUCH 10
 
@@ -27,7 +31,7 @@ public:
 	void start();
 	void stop(bool wait=false);
 	
-	void useCalibration(const string& filename);
+	bool useCalibration(const string& filename);
 	void startCalibration(const string& saveToFilename, int width, int height);
 	void abortCalibration();
 
@@ -45,8 +49,6 @@ public:
 private:
 	ofSerial serial;
 	std::thread thread;
-	int touchMaxX;
-	int touchMaxY;
 	bool bInitialized;
 	bool bRunning;
 	bool bParseSerialInThread;
@@ -62,8 +64,10 @@ private:
 	bool bInCalibration;
 	int calibrationPointIndex;
 	ofVec2f calibrationPoint;
-	ofxJSONElement calibrationJson;
 	ofMatrix3x3 calibrationMatrix;
+#if defined(HAVE_OFXJSON)
+	ofxJSONElement calibrationJson;
+#endif
 	
 
 	bool initEETI();
@@ -72,7 +76,7 @@ private:
 	void parsePacket(const unsigned char* buff);
 	void update(ofEventArgs& args);
 	void addEvent(const Touch& touch);
-	
+
 	void drawCalibration(ofEventArgs& args);
 	void drawCross(const ofVec2f& p);
 	void handleCalibrationTouch(Touch& touch);
