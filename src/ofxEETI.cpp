@@ -29,9 +29,11 @@ ofxEETI::ofxEETI()
 	bRunning = false;
 	bInCalibration = false;
 	bUseCalibration = false;
+	numTouches = 0;
 	
 	for (int i=0; i<MAX_TOUCH; i++) {
 		touches[i].bDown = false;
+		touches[i].type = ofTouchEventArgs::cancel;
 		touches[i].id = i;
 		touches[i].x=0;
 		touches[i].y=0;
@@ -338,6 +340,13 @@ void ofxEETI::update(ofEventArgs &args)
 	touchMutex.unlock();
 	
 	for (Touch& event: sendEvents) {
+		if (event.type == ofTouchEventArgs::down) {
+			numTouches++;
+		}
+		else if (event.type == ofTouchEventArgs::up) {
+			numTouches--;
+		}
+		
 		ofNotifyEvent(eventTouch, event, this);
 		
 		if (bInCalibration) {

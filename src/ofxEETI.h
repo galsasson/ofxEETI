@@ -45,6 +45,7 @@ public:
 	};
 
 	ofEvent<Touch> eventTouch;
+	int numTouches;
 
 private:
 	ofSerial serial;

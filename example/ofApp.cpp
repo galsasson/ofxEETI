@@ -5,6 +5,7 @@ void ofApp::setup(){
 	ofClear(0);
 	ofFill();
 	ofSetFrameRate(60);
+	ofSetDrawBitmapMode(OF_BITMAPMODE_SIMPLE);
 	bFullScreen = false;
 	fbo.allocate(2160, 3840, GL_RGBA);
 	fbo.begin();
@@ -34,6 +35,9 @@ void ofApp::draw(){
 	fbo.draw(0, 0, ofGetWidth(), ofGetHeight());
 	
 	ofDrawBitmapString("'RETURN': clear\n'f': fullscreen toggle\n'c': calibration mode", 10, 18);
+	
+	ofScale(6, 6);
+	ofDrawBitmapString("Touches: "+ofToString(touchPanel.numTouches), 30/6, (ofGetHeight()-30)/6);
 }
 
 //--------------------------------------------------------------
@@ -47,6 +51,9 @@ void ofApp::keyPressed(int key){
 	else if (key == 'f') {
 		bFullScreen = !bFullScreen;
 		ofSetFullscreen(bFullScreen);
+		if (!bFullScreen) {
+			ofSetWindowShape(1024, 768);
+		}
 	}
 	else if (key == 'c') {
 		// enter calibration mode
