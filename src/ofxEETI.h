@@ -27,7 +27,7 @@ public:
 	~ofxEETI();
 	ofxEETI();
 
-	bool setup(const string& devname, int baudrate, bool parseSerialInThread=true);
+	bool setup(const string& devname, int baudrate, bool parseSerialInThread=true, bool bMandatoryInit=true);
 	void start();
 	void stop(bool wait=false);
 	
@@ -71,7 +71,7 @@ private:
 #endif
 	
 
-	bool initEETI();
+	bool initEETI(bool bMandatoryInit);
 	int waitForResponse(int nBytes, unsigned int timeout_ms);	// returns number of bytes available
 	void threadFunction();
 	void parsePacket(const unsigned char* buff);

@@ -41,12 +41,12 @@ ofxEETI::ofxEETI()
 	}
 }
 
-bool ofxEETI::setup(const string &devname, int baudrate, bool parseSerialInThread)
+bool ofxEETI::setup(const string &devname, int baudrate, bool parseSerialInThread, bool bMandatoryInit)
 {
 	ofLogNotice("ofxEETI") << "openning touch device: " << devname << " @ "<<baudrate<<"bps";
 	bool success = serial.setup(devname, baudrate);
 	if (success) {
-		if (initEETI()) {
+		if (initEETI(bMandatoryInit)) {
 			ofLogNotice("ofxEETI") << "EETI eGalax touch panel initialized successfully";
 		}
 		else {
@@ -159,7 +159,7 @@ void ofxEETI::abortCalibration()
 	ofRemoveListener(ofEvents().draw, this, &ofxEETI::drawCalibration, OF_EVENT_ORDER_AFTER_APP);
 }
 
-bool ofxEETI::initEETI()
+bool ofxEETI::initEETI(bool bMandatoryInit)
 {
 	usleep(200000);
 	serial.flush();
@@ -170,7 +170,9 @@ bool ofxEETI::initEETI()
 	serial.writeBytes(eeti_alive, 3);
 	// wait for response
 	if (waitForResponse(3, 500) < 3) {
-		return false;
+        if (bMandatoryInit) {
+            return false;
+        }
 	}
 	
 	int count = serial.available();
@@ -182,14 +184,18 @@ bool ofxEETI::initEETI()
 	if (buff[0] != eeti_alive[0] ||
 		buff[1] != eeti_alive[1] ||
 		buff[2] != eeti_alive[2]) {
-		return false;
+        if (bMandatoryInit) {
+            return false;
+        }
 	}
 	ofLogNotice("ofxEETI") << "Found EETI eGalax touch panel";
 	
 	// get firmware version
 	serial.writeBytes(eeti_fwver, 3);
 	if (waitForResponse(3, 500) < 3) {
-		return false;
+        if (bMandatoryInit) {
+            return false;
+        }
 	}
 	
 	usleep(50000);
@@ -209,7 +215,9 @@ bool ofxEETI::initEETI()
 	// get controller type
 	serial.writeBytes(eeti_ctrlr, 3);
 	if (waitForResponse(3, 500) < 3) {
-		return false;
+        if (bMandatoryInit) {
+            return false;
+        }
 	}
 	
 	usleep(50000);
